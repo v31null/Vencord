@@ -73,6 +73,13 @@ const openBanner = (url: string) => openImage(url, 1024);
 function openImage(url: string, width: number, height?: number) {
     const u = new URL(url, window.location.href);
 
+    const isDiscordCdn = u.protocol !== "blob:" && u.protocol !== "data:"
+        && /(^|\.)(discordapp\.(com|net)|discord\.com)$/.test(u.hostname);
+    if (!isDiscordCdn) {
+        openImageModal({ url, original: url, width, height });
+        return;
+    }
+
     const format = url.startsWith("/")
         ? "png"
         : u.searchParams.get("animated") === "true"

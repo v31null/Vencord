@@ -151,8 +151,11 @@ export const Magnifier = ErrorBoundary.wrap<MagnifierProps>(({ instance, size: i
     }, []);
 
     const imageSrc = useMemo(() => {
+        const { src } = instance.props;
+        if (typeof src === "string" && (src.startsWith("blob:") || src.startsWith("data:")))
+            return src;
         try {
-            const imageUrl = new URL(instance.props.src);
+            const imageUrl = new URL(src);
             if (imageUrl.pathname.startsWith("/attachments/"))
                 imageUrl.hostname = "cdn.discordapp.com";
 

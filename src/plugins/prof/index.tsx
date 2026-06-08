@@ -5,7 +5,7 @@ import definePlugin from "@utils/types";
 import { User } from "@vencord/discord-types";
 import { IconUtils, Menu, UsernameUtils } from "@webpack/common";
 
-import { getOverride, loadOverrides } from "./data";
+import { getOverride, loadOverrides, refreshAll } from "./data";
 import { openEditProfileModal } from "./EditProfileModal";
 
 const restorers: Array<() => void> = [];
@@ -55,6 +55,13 @@ export default definePlugin({
                 match: /\i(?:\?)?\.getPreviewBanner\(\i,\i,\i\)(?=.{0,100}"COMPLETE")/,
                 replace: "$self.bannerUrlHook(arguments[0])||$&"
             }
+        },
+        {
+            find: ".handleImageLoad)",
+            replacement: {
+                match: /getSrc\(\i\)\{/,
+                replace: '$&{const s=this?.props?.src;if(typeof s==="string"&&(s.startsWith("blob:")||s.startsWith("data:")))return s;}'
+            }
         }
     ],
     profileHook(profile: any, userId?: string) {
@@ -78,6 +85,7 @@ export default definePlugin({
         });
         wrap(IconUtils, "getUserAvatarURL", orig => (user, ...rest) => getOverride(user?.id)?.avatarUrl || orig(user, ...rest));
         wrap(IconUtils, "getUserBannerURL", orig => (data, ...rest) => getOverride(data?.id)?.bannerUrl || orig(data, ...rest));
+        refreshAll();
     },
     stop() {
         for (const restore of restorers.splice(0)) restore();

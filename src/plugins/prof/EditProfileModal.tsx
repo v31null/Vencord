@@ -2,11 +2,11 @@ import { fetchUserProfile, openUserProfile } from "@utils/discord";
 import { ModalCloseButton, ModalContent, ModalFooter, ModalHeader, ModalRoot, ModalSize, openModal } from "@utils/modal";
 import { RenderModalProps } from "@vencord/discord-types";
 import { findByCodeLazy, findByPropsLazy, findComponentByCodeLazy } from "@webpack";
-import { Button, FluxDispatcher, IconUtils, Parser, Text, TextInput, Toasts, useEffect, useRef, UserProfileStore, UserStore, useState } from "@webpack/common";
+import { Button, IconUtils, Parser, Text, TextInput, Toasts, useEffect, useRef, UserProfileStore, useState } from "@webpack/common";
 import { applyPalette, GIFEncoder, quantize } from "gifenc";
 import type { ChangeEvent } from "react";
 
-import { deleteImageFile, getOverride, getStored, ResolvedOverride, saveImageFile, saveOverride, setLivePreview, StoredProfile } from "./data";
+import { deleteImageFile, getOverride, getStored, refreshUser, ResolvedOverride, saveImageFile, saveOverride, setLivePreview, StoredProfile } from "./data";
 
 const ChatInputTypes = findByPropsLazy("FORM", "USER_PROFILE");
 const ChannelTextArea = findComponentByCodeLazy("editorClassName", "CHANNEL_TEXT_AREA");
@@ -20,13 +20,6 @@ const MClose = ModalCloseButton as unknown as React.FC<any>;
 
 function toast(message: string, type: any) {
     Toasts.show({ message, type, id: Toasts.genId(), options: { position: Toasts.Position.BOTTOM } });
-}
-
-function nudgeRerender(userId: string) {
-    try {
-        const user = UserStore.getUser(userId);
-        if (user) FluxDispatcher.dispatch({ type: "USER_UPDATE", user });
-    } catch { }
 }
 
 type Pending = { base64: string; ext: string; } | null;
@@ -319,7 +312,7 @@ function EditProfileModal({ user, props }: { user: any; props: RenderModalProps;
     useEffect(() => () => {
         if (!committed.current) {
             setLivePreview(user.id, originalOverride.current);
-            nudgeRerender(user.id);
+            refreshUser(user.id);
         }
     }, []);
 
@@ -388,7 +381,7 @@ function EditProfileModal({ user, props }: { user: any; props: RenderModalProps;
 
             committed.current = true;
             await saveOverride(user.id, out);
-            nudgeRerender(user.id);
+            refreshUser(user.id);
             toast("Local profile saved", Toasts.Type.SUCCESS);
             props.onClose();
         } catch (e: any) {
@@ -404,7 +397,7 @@ function EditProfileModal({ user, props }: { user: any; props: RenderModalProps;
             if (rec.bannerFile) await deleteImageFile(rec.bannerFile);
             committed.current = true;
             await saveOverride(user.id, {});
-            nudgeRerender(user.id);
+            refreshUser(user.id);
             toast("Reset to real profile", Toasts.Type.SUCCESS);
             props.onClose();
         } catch (e: any) {
@@ -416,7 +409,7 @@ function EditProfileModal({ user, props }: { user: any; props: RenderModalProps;
 
     function openNative() {
         setLivePreview(user.id, currentResolved());
-        nudgeRerender(user.id);
+        refreshUser(user.id);
         try { openUserProfile(user.id); } catch (e) { console.error("[prof] openUserProfile failed:", e); }
     }
 

@@ -1,4 +1,5 @@
 import { PluginNative } from "@utils/types";
+import { FluxDispatcher, UserStore } from "@webpack/common";
 
 type ProfNative = PluginNative<typeof import("./native")>;
 
@@ -84,6 +85,17 @@ export async function loadOverrides() {
 
 export function getOverride(userId?: string | null): ResolvedOverride | undefined {
     return userId ? cache[userId] : undefined;
+}
+
+export function refreshUser(userId: string) {
+    try {
+        const user = UserStore.getUser(userId);
+        if (user) FluxDispatcher.dispatch({ type: "USER_UPDATE", user });
+    } catch { }
+}
+
+export function refreshAll() {
+    for (const id of Object.keys(cache)) refreshUser(id);
 }
 
 export function getStored(userId: string): StoredProfile | undefined {
