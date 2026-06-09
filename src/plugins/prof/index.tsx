@@ -3,10 +3,12 @@ import "./styles.css";
 import { findGroupChildrenByChildId, NavContextMenuPatchCallback } from "@api/ContextMenu";
 import definePlugin from "@utils/types";
 import { User } from "@vencord/discord-types";
-import { IconUtils, Menu, UsernameUtils } from "@webpack/common";
+import { IconUtils, Menu, UsernameUtils, UserStore } from "@webpack/common";
 
-import { getOverride, loadOverrides, refreshAll } from "./data";
+import { getOverride, getOverrideIds, loadOverrides, refreshAll } from "./data";
 import { openEditProfileModal } from "./EditProfileModal";
+import { renderStyledName } from "./nameStyle";
+import { installDnsAccessor } from "./nativeDns";
 
 const restorers: Array<() => void> = [];
 
@@ -62,8 +64,68 @@ export default definePlugin({
                 match: /getSrc\(\i\)\{/,
                 replace: '$&{const s=this?.props?.src;if(typeof s==="string"&&(s.startsWith("blob:")||s.startsWith("data:")))return s;}'
             }
+        },
+        // Chat message author name — full effect
+        {
+            find: '="SYSTEM_TAG"',
+            replacement: {
+                match: /(?<=onContextMenu:\i,children:)\i\?(?=.{0,100}?user[Nn]ame:)/,
+                replace: "$self.renderAuthorName(arguments[0]),_vcProfOld:$&"
+            }
+        },
+        // User mentions — color
+        {
+            find: ".USER_MENTION)",
+            replacement: {
+                match: /(?<=user:(\i),guildId:([^,]+?),.{0,100}?children:\i=>\i)\((\i)\)/,
+                replace: "({...$3,color:$self.mentionColor($1?.id)})"
+            }
+        },
+        // Voice users — color
+        {
+            find: "#{intl::GUEST_NAME_SUFFIX})]",
+            replacement: {
+                match: /#{intl::GUEST_NAME_SUFFIX}.{0,50}?""\](?<=guildId:(\i),.+?user:(\i).+?)/,
+                replace: "$&,style:$self.voiceStyle($2.id),"
+            }
+        },
+        // Member list — color
+        {
+            find: "#{intl::GUILD_OWNER}),children:",
+            replacement: {
+                match: /(?<=roleName:\i,)colorString:/,
+                replace: "colorString:$self.listColor(arguments[0])||"
+            }
         }
     ],
+    renderAuthorName(props: any) {
+        try {
+            const author = props?.author;
+            const user = props?.userOverride ?? props?.message?.author;
+            const id = user?.id ?? author?.authorId;
+            const prefix = props?.withMentionPrefix ? "@" : "";
+            const name = author?.nick ?? user?.globalName ?? user?.username ?? "";
+            return <>{prefix}{renderStyledName(name, getOverride(id))}</>;
+        } catch {
+            return <>{props?.author?.nick ?? ""}</>;
+        }
+    },
+    mentionColor(userId?: string) {
+        const o = getOverride(userId);
+        const c = o?.nameColor ?? o?.nameColors?.[0];
+        if (!c) return null;
+        const n = parseInt(c.replace("#", ""), 16);
+        return Number.isNaN(n) ? null : n;
+    },
+    voiceStyle(userId?: string) {
+        const o = getOverride(userId);
+        const color = o?.nameColor ?? o?.nameColors?.[0];
+        return color ? { color } : undefined;
+    },
+    listColor(context: any) {
+        const o = getOverride(context?.user?.id);
+        return o?.nameColor ?? o?.nameColors?.[0] ?? null;
+    },
     profileHook(profile: any, userId?: string) {
         const o = getOverride(userId ?? profile?.userId ?? profile?.id);
         if (!profile || !o || (o.bio == null && o.pronouns == null)) return profile;
@@ -78,13 +140,33 @@ export default definePlugin({
     },
     async start() {
         await loadOverrides();
-        wrap(UsernameUtils, "getName", orig => (...args) => getOverride(findUserId(args))?.name || orig(...args));
+        wrap(UsernameUtils, "getName", orig => (...args) => {
+            const id = findUserId(args);
+            const o = getOverride(id);
+            if (o) installDnsAccessor(args.find(a => a && a.id === id));
+            return o?.name || orig(...args);
+        });
         wrap(UsernameUtils, "useName", orig => (...args) => {
             const real = orig(...args);
-            return getOverride(findUserId(args))?.name || real;
+            const id = findUserId(args);
+            const o = getOverride(id);
+            if (o) installDnsAccessor(args.find(a => a && a.id === id));
+            return o?.name || real;
         });
         wrap(IconUtils, "getUserAvatarURL", orig => (user, ...rest) => getOverride(user?.id)?.avatarUrl || orig(user, ...rest));
         wrap(IconUtils, "getUserBannerURL", orig => (data, ...rest) => getOverride(data?.id)?.bannerUrl || orig(data, ...rest));
+
+        const me = UserStore.getCurrentUser();
+        let proto = me ? Object.getPrototypeOf(me) : null;
+        while (proto && !Object.prototype.hasOwnProperty.call(proto, "getAvatarURL"))
+            proto = Object.getPrototypeOf(proto);
+        if (proto)
+            wrap(proto, "getAvatarURL", orig => function (this: any, ...args: any[]) {
+                return getOverride(this?.id)?.avatarUrl || orig.apply(this, args);
+            });
+
+        for (const id of getOverrideIds()) installDnsAccessor(UserStore.getUser(id));
+
         refreshAll();
     },
     stop() {

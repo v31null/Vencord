@@ -287,3 +287,82 @@
     font-family: var(--font-code, monospace);
     white-space: pre-wrap;
 }
+
+.vc-prof-color {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+    flex: 0 0 auto;
+}
+
+.vc-prof-swatch {
+    position: relative;
+    display: inline-flex;
+    flex: 0 0 auto;
+}
+
+.vc-prof-swatch-x {
+    position: absolute;
+    top: -4px;
+    inset-inline-end: -4px;
+    width: 14px;
+    height: 14px;
+    line-height: 12px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: var(--background-tertiary, #000);
+    color: var(--text-default, #fff);
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.vc-prof-dns-solid {
+    color: var(--vc-prof-dns-main);
+}
+
+.vc-prof-dns-toon {
+    paint-order: stroke;
+    -webkit-text-stroke: calc(1.6px + 0.04em) var(--vc-prof-dns-toon-stroke);
+    color: var(--vc-prof-dns-main);
+}
+
+.vc-prof-dns-neon {
+    color: var(--vc-prof-dns-main);
+    text-shadow:
+        0 0 2px var(--vc-prof-dns-neon-stroke),
+        0 0 6px var(--vc-prof-dns-neon-stroke),
+        0 0 12px var(--vc-prof-dns-neon-stroke);
+}
+
+.vc-prof-dns-gradient {
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+}
+
+.vc-prof-dns-perchar {
+    display: inline;
+}
+
+/* Hover underline takes the name colour instead of the default text colour.
+   Discord draws the underline on the outer clickable element, so we suppress
+   that and let our own span draw it. */
+[class*="clickable"]:has(> .vc-prof-dns):hover {
+    text-decoration: none;
+}
+
+[class*="clickable"]:hover > .vc-prof-dns {
+    text-decoration: underline;
+    text-decoration-color: var(--vc-prof-dns-main, currentColor);
+    text-underline-offset: 0.1em;
+}
+
+[class*="clickable"]:hover > .vc-prof-dns-perchar > span {
+    text-decoration: underline;
+    text-decoration-color: currentColor;
+}

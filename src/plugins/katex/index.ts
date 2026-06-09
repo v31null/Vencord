@@ -1,6 +1,6 @@
 import { Devs } from "@utils/constants";
 import definePlugin from "@utils/types";
-import { React } from "@webpack/common";
+import { MessageStore, SelectedChannelStore } from "@webpack/common";
 
 declare const katex: any;
 
@@ -68,13 +68,24 @@ export default definePlugin({
                 .map((c) => this.extractRawText(c))
                 .join("");
 
-            if (el.tagName === "EM") return "_" + inner + "_";
+            if (el.tagName === "EM") return "*" + inner + "*";
             if (el.tagName === "STRONG") return "**" + inner + "**";
             if (el.tagName === "U") return "__" + inner + "__";
             if (el.tagName === "S") return "~~" + inner + "~~";
             return inner;
         }
         return "";
+    },
+    getStoredContent(msg: Element): string | null {
+        const m = msg.id?.match(/^message-content-(\d+)$/);
+        if (!m) return null;
+        try {
+            const channelId = SelectedChannelStore.getChannelId();
+            const stored = MessageStore.getMessage(channelId, m[1]);
+            return stored?.content ?? null;
+        } catch {
+            return null;
+        }
     },
     parseMath(
         text: string
@@ -300,7 +311,8 @@ export default definePlugin({
         targets.forEach((msg: Element) => {
             if (msg.getAttribute("data-katex-processed")) return;
 
-            const text = this.extractRawText(msg);
+            const stored = this.getStoredContent(msg);
+            const text = stored != null ? stored : this.extractRawText(msg);
             if (!text.includes("$") && !text.includes("|")) return;
 
             const tokens = this.tokenize(text);

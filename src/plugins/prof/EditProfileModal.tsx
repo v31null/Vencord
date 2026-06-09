@@ -6,7 +6,8 @@ import { Button, IconUtils, Parser, Text, TextInput, Toasts, useEffect, useRef, 
 import { applyPalette, GIFEncoder, quantize } from "gifenc";
 import type { ChangeEvent } from "react";
 
-import { deleteImageFile, getOverride, getStored, refreshUser, ResolvedOverride, saveImageFile, saveOverride, setLivePreview, StoredProfile } from "./data";
+import { deleteImageFile, getOverride, getStored, NameEffect, refreshUser, ResolvedOverride, saveImageFile, saveOverride, setLivePreview, StoredProfile } from "./data";
+import { renderStyledName } from "./nameStyle";
 
 const ChatInputTypes = findByPropsLazy("FORM", "USER_PROFILE");
 const ChannelTextArea = findComponentByCodeLazy("editorClassName", "CHANNEL_TEXT_AREA");
@@ -207,7 +208,7 @@ function BioEditor({ value, onChange }: { value: string; onChange: (s: string) =
     );
 }
 
-function ReplicaCard({ name, realName, username, pronouns, avatarPreview, bannerPreview, bio }: any) {
+function ReplicaCard({ name, realName, username, pronouns, avatarPreview, bannerPreview, bio, dns }: any) {
     return (
         <div className="vc-prof-card">
             <div className="vc-prof-inner">
@@ -220,7 +221,9 @@ function ReplicaCard({ name, realName, username, pronouns, avatarPreview, banner
                 <div className="vc-prof-body">
                     <div>
                         <div className="vc-prof-name-row">
-                            <div className="vc-prof-name">{name || realName}</div>
+                            <div className="vc-prof-name">
+                                {renderStyledName(name || realName, dns)}
+                            </div>
                         </div>
                         <div className="vc-prof-user-row">
                             <span className="vc-prof-usertag">{username}</span>
@@ -257,6 +260,11 @@ function EditProfileModal({ user, props }: { user: any; props: RenderModalProps;
     const [name, setName] = useState<string>(rec.name ?? realName ?? "");
     const [bio, setBio] = useState<string>(rec.bio ?? realBio ?? "");
     const [pronouns, setPronouns] = useState<string>(rec.pronouns ?? realPronouns ?? "");
+    const [nameColor, setNameColor] = useState<string>(rec.nameColor ?? "");
+    const [nameEffect, setNameEffect] = useState<NameEffect>(rec.nameEffect ?? "solid");
+    const [nameColors, setNameColors] = useState<string[]>(
+        rec.nameColors ?? (rec.nameColor2 ? [rec.nameColor ?? "#ffffff", rec.nameColor2] : rec.nameColor ? [rec.nameColor, "#ff0000"] : ["#ffffff", "#ff0000"])
+    );
     const [avatarPreview, setAvatarPreview] = useState<string>(resolved.avatarUrl ?? realAvatar ?? "");
     const [bannerPreview, setBannerPreview] = useState<string>(resolved.bannerUrl ?? realBanner ?? "");
     const [bioKey, setBioKey] = useState(0);
@@ -298,6 +306,15 @@ function EditProfileModal({ user, props }: { user: any; props: RenderModalProps;
         if (name.trim() && name.trim() !== realName) r.name = name.trim();
         if (bio.trim() && bio !== realBio) r.bio = bio;
         if (pronouns.trim() && pronouns.trim() !== realPronouns) r.pronouns = pronouns.trim();
+        {
+            const usesArray = nameEffect === "gradient" || nameEffect === "perchar";
+            const colors = usesArray ? nameColors.filter(Boolean) : (nameColor.trim() ? [nameColor.trim()] : []);
+            if (colors.length) {
+                r.nameEffect = nameEffect;
+                if (usesArray) r.nameColors = colors;
+                else r.nameColor = colors[0];
+            }
+        }
         const avatarChanged = avatarTouched.current ? !!avatarUpload.current : (!!rec.avatarFile || !!rec.avatarUrl);
         if (avatarChanged) r.avatarUrl = avatarPreview;
         const bannerChanged = bannerTouched.current ? !!bannerUpload.current : (!!rec.bannerFile || !!rec.bannerUrl);
@@ -307,7 +324,7 @@ function EditProfileModal({ user, props }: { user: any; props: RenderModalProps;
 
     useEffect(() => {
         setLivePreview(user.id, currentResolved());
-    }, [name, bio, pronouns, avatarPreview, bannerPreview]);
+    }, [name, bio, pronouns, avatarPreview, bannerPreview, nameColor, nameEffect, nameColors]);
 
     useEffect(() => () => {
         if (!committed.current) {
@@ -375,6 +392,15 @@ function EditProfileModal({ user, props }: { user: any; props: RenderModalProps;
             if (name.trim() && name.trim() !== realName) out.name = name.trim();
             if (bio.trim() && bio !== realBio) out.bio = bio;
             if (pronouns.trim() && pronouns.trim() !== realPronouns) out.pronouns = pronouns.trim();
+            {
+                const usesArray = nameEffect === "gradient" || nameEffect === "perchar";
+                const colors = usesArray ? nameColors.filter(Boolean) : (nameColor.trim() ? [nameColor.trim()] : []);
+                if (colors.length) {
+                    out.nameEffect = nameEffect;
+                    if (usesArray) out.nameColors = colors;
+                    else out.nameColor = colors[0];
+                }
+            }
 
             await resolveSlot("avatar", avatarTouched.current, avatarUpload.current, rec.avatarFile, rec.avatarUrl, out);
             await resolveSlot("banner", bannerTouched.current, bannerUpload.current, rec.bannerFile, rec.bannerUrl, out);
@@ -416,7 +442,7 @@ function EditProfileModal({ user, props }: { user: any; props: RenderModalProps;
     async function exportProfile() {
         try {
             const r = currentResolved();
-            const bundle: any = { v: 1, name: r.name, pronouns: r.pronouns, bio: r.bio };
+            const bundle: any = { v: 1, name: r.name, pronouns: r.pronouns, bio: r.bio, nameColor: r.nameColor, nameEffect: r.nameEffect, nameColors: r.nameColors };
             if (r.avatarUrl) bundle.avatar = await toDataUrl(r.avatarUrl);
             if (r.bannerUrl) bundle.banner = await toDataUrl(r.bannerUrl);
             const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
@@ -441,6 +467,10 @@ function EditProfileModal({ user, props }: { user: any; props: RenderModalProps;
             const bundle = JSON.parse(await file.text());
             if (bundle.name != null) setName(String(bundle.name));
             if (bundle.pronouns != null) setPronouns(String(bundle.pronouns));
+            if (bundle.nameColor != null) setNameColor(String(bundle.nameColor));
+            if (bundle.nameEffect != null) setNameEffect(bundle.nameEffect as NameEffect);
+            if (Array.isArray(bundle.nameColors)) setNameColors(bundle.nameColors.map(String));
+            else if (bundle.nameColor2 != null) setNameColors([String(bundle.nameColor ?? "#ffffff"), String(bundle.nameColor2)]);
             if (bundle.bio != null) {
                 setBio(String(bundle.bio));
                 setBioKey(k => k + 1);
@@ -481,6 +511,40 @@ function EditProfileModal({ user, props }: { user: any; props: RenderModalProps;
                         </div>
 
                         <div className="vc-prof-section">
+                            <h5 className="vc-prof-eyebrow">Name style</h5>
+                            <div className="vc-prof-btn-row" style={{ marginBottom: 8, flexWrap: "wrap" }}>
+                                {(["solid", "toon", "neon", "gradient", "perchar"] as NameEffect[]).map(fx => (
+                                    <Button
+                                        key={fx}
+                                        size={Button.Sizes.SMALL}
+                                        color={nameEffect === fx ? Button.Colors.BRAND : Button.Colors.PRIMARY}
+                                        look={nameEffect === fx ? Button.Looks.FILLED : Button.Looks.LINK}
+                                        onClick={() => setNameEffect(fx)}
+                                    >
+                                        {fx === "perchar" ? "Per-char" : fx[0].toUpperCase() + fx.slice(1)}
+                                    </Button>
+                                ))}
+                            </div>
+                            {nameEffect === "gradient" || nameEffect === "perchar" ? (
+                                <div className="vc-prof-btn-row" style={{ flexWrap: "wrap" }}>
+                                    {nameColors.map((c, i) => (
+                                        <span key={i} className="vc-prof-swatch">
+                                            <input type="color" className="vc-prof-color" value={c || "#ffffff"} onChange={e => { const v = (e.target as HTMLInputElement).value; setNameColors(nameColors.map((x, j) => j === i ? v : x)); }} />
+                                            {nameColors.length > 1 && <button type="button" className="vc-prof-swatch-x" onClick={() => setNameColors(nameColors.filter((_, j) => j !== i))}>×</button>}
+                                        </span>
+                                    ))}
+                                    <Button size={Button.Sizes.SMALL} color={Button.Colors.PRIMARY} look={Button.Looks.LINK} onClick={() => setNameColors([...nameColors, "#ffffff"])}>+ Colour</Button>
+                                </div>
+                            ) : (
+                                <div className="vc-prof-btn-row">
+                                    <input type="color" className="vc-prof-color" value={nameColor || "#ffffff"} onChange={e => setNameColor((e.target as HTMLInputElement).value)} />
+                                    <TextInput value={nameColor} onChange={setNameColor} placeholder="#rrggbb (off)" maxLength={7} />
+                                    {nameColor && <Button size={Button.Sizes.SMALL} color={Button.Colors.PRIMARY} look={Button.Looks.LINK} onClick={() => setNameColor("")}>Clear</Button>}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="vc-prof-section">
                             <h5 className="vc-prof-eyebrow">Pronouns</h5>
                             <TextInput value={pronouns} onChange={setPronouns} placeholder={realPronouns || "Add your pronouns"} maxLength={40} />
                         </div>
@@ -511,7 +575,7 @@ function EditProfileModal({ user, props }: { user: any; props: RenderModalProps;
 
                     <div className="vc-prof-preview-col">
                         <h5 className="vc-prof-eyebrow" style={{ alignSelf: "flex-start" }}>Preview</h5>
-                        <ReplicaCard name={name} realName={realName} username={user.username} pronouns={pronouns} avatarPreview={avatarPreview} bannerPreview={bannerPreview} bio={bio} />
+                        <ReplicaCard name={name} realName={realName} username={user.username} pronouns={pronouns} avatarPreview={avatarPreview} bannerPreview={bannerPreview} bio={bio} dns={currentResolved()} />
                         <Button size={Button.Sizes.SMALL} look={Button.Looks.LINK} color={Button.Colors.PRIMARY} onClick={openNative}>
                             Open in real Discord profile ↗
                         </Button>

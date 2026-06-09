@@ -102,6 +102,18 @@ cardinalValues: {
     },
 
     convertText(text: string) {
+        if (!text.includes("$")) return this.convertPlain(text);
+        const re = /\$\$[\s\S]*?\$\$|\$[^$\n]+?\$/g;
+        let out = "", last = 0, m: RegExpExecArray | null;
+        while ((m = re.exec(text)) !== null) {
+            out += this.convertPlain(text.slice(last, m.index));
+            out += m[0];
+            last = m.index + m[0].length;
+        }
+        return out + this.convertPlain(text.slice(last));
+    },
+
+    convertPlain(text: string) {
         text = this.normalizeOrdinals(text);
          text = text.replace(/\bThe /g, 'Þͤ ').replace(/\bTHE /g, 'Þͤ ').replace(/\bTHe /g, 'Þͤ ').replace(/\bthe /g, 'þͤ ');
         let res = "";
@@ -132,12 +144,13 @@ cardinalValues: {
 walk(node: Node) {
     const el = node.nodeType === 1 ? (node as HTMLElement) : node.parentElement;
     if (el) {
-        if (el.tagName === "INPUT" || 
-            el.tagName === "TEXTAREA" || 
-            el.tagName === "SCRIPT" || 
-            el.tagName === "STYLE" || 
-            el.isContentEditable || 
-            !!el.closest('[contenteditable="true"]')) {
+        if (el.tagName === "INPUT" ||
+            el.tagName === "TEXTAREA" ||
+            el.tagName === "SCRIPT" ||
+            el.tagName === "STYLE" ||
+            el.isContentEditable ||
+            !!el.closest('[contenteditable="true"]') ||
+            !!el.closest(".katex")) {
             return;
         }
     }

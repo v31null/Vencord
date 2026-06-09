@@ -18,7 +18,7 @@
 
 import "./fixDiscordBadgePadding.css";
 
-import { _getBadges, BadgePosition, BadgeUserArgs, ProfileBadge } from "@api/Badges";
+import { _getBadges, addProfileBadge, BadgePosition, BadgeUserArgs, ProfileBadge, removeProfileBadge } from "@api/Badges";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { Flex } from "@components/Flex";
 import { Heart } from "@components/Heart";
@@ -41,6 +41,16 @@ const ContributorBadge: ProfileBadge = {
     position: BadgePosition.START,
     shouldShow: ({ userId }) => shouldShowContributorBadge(userId),
     onClick: (_, { userId }) => openContributorModal(UserStore.getUser(userId))
+};
+
+const SATURN_BADGE = "https://cdn.discordapp.com/emojis/1513673680058585248.png?size=64";
+
+const SaturnBadge: ProfileBadge = {
+    id: "saturn_flag_pz_badge",
+    description: "Primus inter pares",
+    iconSrc: SATURN_BADGE,
+    position: BadgePosition.START,
+    shouldShow: ({ userId }) => userId === "1108761945303158784"
 };
 
 let DonorBadges = {} as Record<string, Array<Record<"tooltip" | "badge", string>>>;
@@ -133,6 +143,8 @@ export default definePlugin({
     userProfileBadge: ContributorBadge,
 
     async start() {
+        addProfileBadge(SaturnBadge);
+
         await loadBadges();
 
         clearInterval(intervalId);
@@ -140,6 +152,7 @@ export default definePlugin({
     },
 
     async stop() {
+        removeProfileBadge(SaturnBadge);
         clearInterval(intervalId);
     },
 
