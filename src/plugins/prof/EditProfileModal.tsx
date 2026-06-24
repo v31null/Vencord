@@ -185,10 +185,47 @@ function CropModal({ src, isGif, frameW, frameH, targetW, targetH, onApply, prop
     );
 }
 
+function slateText(editor: any): string {
+    if (!editor) return "";
+    const walk = (n: any): string =>
+        typeof n?.text === "string"
+            ? n.text
+            : Array.isArray(n?.children) ? n.children.map(walk).join("") : "";
+    return (editor.children ?? []).map(walk).join("\n");
+}
+
 function BioEditor({ value, onChange }: { value: string; onChange: (s: string) => void; }) {
+    const editorRef = useRef<any>(null);
+    const seed = useRef(value).current;
     const channel = useRef(createChannelRecordFromServer({ id: "0", type: 1 })).current;
     const type = ChatInputTypes.FORM;
     type.disableAutoFocus = true;
+
+    const read = () => {
+        try {
+            const slate = editorRef.current?.ref?.current?.getSlateEditor?.();
+            if (slate) onChange(slateText(slate).slice(0, 190));
+        } catch { }
+    };
+
+    useEffect(() => {
+        let raf = 0;
+        let restore: (() => void) | null = null;
+        const attach = () => {
+            const slate = editorRef.current?.ref?.current?.getSlateEditor?.();
+            if (!slate) { raf = requestAnimationFrame(attach); return; }
+            const orig = slate.onChange;
+            slate.onChange = function (this: any, ...args: any[]) {
+                const r = orig ? orig.apply(this, args) : undefined;
+                read();
+                return r;
+            };
+            restore = () => { slate.onChange = orig; };
+        };
+        attach();
+        return () => { if (raf) cancelAnimationFrame(raf); restore?.(); };
+    }, []);
+
     return (
         <div className="vc-prof-bio-wrap">
             <ChannelTextArea
@@ -197,12 +234,9 @@ function BioEditor({ value, onChange }: { value: string; onChange: (s: string) =
                 type={type}
                 disableThemedBackground={true}
                 placeholder="About me…"
-                textValue={value}
-                maxCharacterCount={190}
-                onChange={(...args: any[]) => {
-                    const next = args.find(a => typeof a === "string");
-                    if (next != null) onChange(next.slice(0, 190));
-                }}
+                textValue={seed}
+                setEditorRef={(r: any) => editorRef.current = r}
+                onChange={read}
             />
         </div>
     );

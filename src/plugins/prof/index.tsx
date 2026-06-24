@@ -70,7 +70,7 @@ export default definePlugin({
             find: '="SYSTEM_TAG"',
             replacement: {
                 match: /(?<=onContextMenu:\i,children:)\i\?(?=.{0,100}?user[Nn]ame:)/,
-                replace: "$self.renderAuthorName(arguments[0]),_vcProfOld:$&"
+                replace: "$self.renderOwnName(arguments[0])?$self.renderAuthorName(arguments[0]):$&"
             }
         },
         // User mentions — color
@@ -98,6 +98,16 @@ export default definePlugin({
             }
         }
     ],
+    renderOwnName(props: any) {
+        try {
+            const user = props?.userOverride ?? props?.message?.author;
+            const id = user?.id ?? props?.author?.authorId;
+            const o = getOverride(id);
+            return !!(o?.nameColor || o?.nameColors?.length);
+        } catch {
+            return false;
+        }
+    },
     renderAuthorName(props: any) {
         try {
             const author = props?.author;
