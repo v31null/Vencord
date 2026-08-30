@@ -1,27 +1,10 @@
-/*
- * Vencord, a modification for Discord's desktop app
- * Copyright (c) 2022 Vendicated and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
-*/
-
 import "./fixDiscordBadgePadding.css";
 
 import { _getBadges, addProfileBadge, BadgePosition, BadgeUserArgs, ProfileBadge, removeProfileBadge } from "@api/Badges";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { Flex } from "@components/Flex";
 import { Heart } from "@components/Heart";
+import { CopyIcon, LinkIcon } from "@components/Icons";
 import DonateButton from "@components/settings/DonateButton";
 import { openContributorModal } from "@components/settings/tabs";
 import { Devs } from "@utils/constants";
@@ -78,6 +61,7 @@ function BadgeContextMenu({ badge }: { badge: Omit<ProfileBadge, "id"> & BadgeUs
                     id="vc-badge-copy-name"
                     label="Copy Badge Name"
                     action={() => copyWithToast(badge.description!)}
+                    leadingAccessory={{ type: "icon", icon: CopyIcon }}
                 />
             )}
             {badge.iconSrc && (
@@ -85,6 +69,7 @@ function BadgeContextMenu({ badge }: { badge: Omit<ProfileBadge, "id"> & BadgeUs
                     id="vc-badge-copy-link"
                     label="Copy Badge Image Link"
                     action={() => copyWithToast(badge.iconSrc!)}
+                    leadingAccessory={{ type: "icon", icon: LinkIcon }}
                 />
             )}
         </Menu.Menu>
@@ -104,17 +89,14 @@ export default definePlugin({
                     match: /alt:" ","aria-hidden":!0,src:.{0,50}(\i).iconSrc/,
                     replace: "...$1.props,$&"
                 },
-                // Path with 2026-04-badge-discovery OFF
                 {
                     match: /(?<=forceOpen:.{0,40}?ariaHidden:!0,)children:(?=.{0,50}?(\i)\.id)/,
                     replace: "children:$1.component?$self.renderBadgeComponent({...$1}):"
                 },
-                // Path with 2026-04-badge-discovery ON
                 {
                     match: /(?<=fallbackIconSrc:.{0,50}?)children:(?=.{0,50}?(\i)\.id)/,
                     replace: "children:$1.component?$self.renderBadgeComponent({...$1}):"
                 },
-                // handle onClick and onContextMenu
                 {
                     match: /href:(\i)\.link/,
                     replace: "...$self.getBadgeMouseEventHandlers($1),$&"
@@ -130,7 +112,6 @@ export default definePlugin({
         }
     ],
 
-    // for access from the console or other plugins
     get DonorBadges() {
         return DonorBadges;
     },

@@ -1,21 +1,3 @@
-/*
- * Vencord, a modification for Discord's desktop app
- * Copyright (c) 2023 Vendicated and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
-*/
-
 import ErrorBoundary from "@components/ErrorBoundary";
 import { settings } from "@plugins/imageZoom";
 import { ELEMENT_ID } from "@plugins/imageZoom/constants";
@@ -53,7 +35,6 @@ export const Magnifier = ErrorBoundary.wrap<MagnifierProps>(({ instance, size: i
     const originalVideoElementRef = useRef<HTMLVideoElement | null>(null);
     const imageRef = useRef<HTMLImageElement | null>(null);
 
-    // since we accessing document im gonna use useLayoutEffect
     useLayoutEffect(() => {
         const onKeyDown = (e: KeyboardEvent) => {
             if (e.key === "Shift") {
@@ -92,7 +73,6 @@ export const Magnifier = ErrorBoundary.wrap<MagnifierProps>(({ instance, size: i
                 zoom.current = settings.store.zoom;
                 size.current = settings.store.size;
 
-                // close context menu if open
                 if (document.getElementById("image-context")) {
                     FluxDispatcher.dispatch({ type: "CONTEXT_MENU_CLOSE" });
                 }
@@ -151,11 +131,12 @@ export const Magnifier = ErrorBoundary.wrap<MagnifierProps>(({ instance, size: i
     }, []);
 
     const imageSrc = useMemo(() => {
-        const { src } = instance.props;
-        if (typeof src === "string" && (src.startsWith("blob:") || src.startsWith("data:")))
-            return src;
         try {
-            const imageUrl = new URL(src);
+            const imageUrl = new URL(instance.props.src);
+
+            if (imageUrl.protocol !== "http:" && imageUrl.protocol !== "https:")
+                return instance.props.src;
+
             if (imageUrl.pathname.startsWith("/attachments/"))
                 imageUrl.hostname = "cdn.discordapp.com";
 
