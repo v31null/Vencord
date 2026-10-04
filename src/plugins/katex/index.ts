@@ -2,12 +2,58 @@ import { Devs } from "@utils/constants";
 import definePlugin from "@utils/types";
 import { MessageStore, SelectedChannelStore } from "@webpack/common";
 
+import { parseMath, spans, tokenize } from "./parse";
+
 declare const katex: any;
+
+function pad(text: string) {
+    const math = new Array<boolean>(text.length).fill(false);
+    const mark = (start: number, source: string) => {
+        let pos = start;
+        for (const part of parseMath(source)) {
+            const len = part.content.length + (part.type === "display" ? 4 : part.type === "inline" ? 2 : 0);
+            if (part.type !== "text") math.fill(true, pos, pos + len);
+            pos += len;
+        }
+    };
+    for (const span of spans(text)) {
+        if (span.type !== "table") {
+            math.fill(true, span.start, span.end);
+            continue;
+        }
+        let offset = span.start;
+        for (const line of span.content.split("\n")) {
+            let cell = offset;
+            for (const part of line.split("|")) {
+                mark(cell, part);
+                cell += part.length + 1;
+            }
+            offset += line.length + 1;
+        }
+    }
+    let out = "";
+    for (let i = 0; i < text.length; i++) {
+        out += text[i];
+        if (text[i] === ":" && math[i] && text[i + 1] !== "\u2060") out += "\u2060";
+    }
+    return out;
+}
 
 export default definePlugin({
     name: "KaTeX-Integration",
     description: "Renders LaTeX formulas in messages using KaTeX",
     authors: [{ name: "V31NULL", id: 1108761945303158784n }],
+    patches: [
+        {
+            find: ".handleSendMessage,onResize:",
+            replacement: {
+                match: /(let \i=\i\.\i\.parse\(\i,)(\i)\)/,
+                replace: "$1$self.pad($2))"
+            }
+        }
+    ],
+
+    pad,
 
     observer: null as MutationObserver | null,
 
@@ -33,14 +79,36 @@ export default definePlugin({
             "https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js";
         script.onload = () => {
             console.log("KaTeX loaded");
-            this.startObserver();
+            const mhchem = document.createElement("script");
+            mhchem.src =
+                "https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/mhchem.min.js";
+            mhchem.onload = mhchem.onerror = () => this.startObserver();
+            document.head.appendChild(mhchem);
         };
         document.head.appendChild(script);
+
+        document.addEventListener("paste", this.onPaste, true);
     },
 
     stop() {
         this.observer?.disconnect();
         document.getElementById("katex-table-styles")?.remove();
+        document.removeEventListener("paste", this.onPaste, true);
+    },
+
+    onPaste(event: ClipboardEvent) {
+        const target = event.target as HTMLElement | null;
+        if (!event.isTrusted || !target?.closest?.('[role="textbox"]')) return;
+        const text = event.clipboardData?.getData("text/plain");
+        if (!text) return;
+        const padded = pad(text);
+        if (padded === text) return;
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const data = new DataTransfer();
+        data.setData("text/plain", padded);
+        target.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
     },
 
     startObserver() {
@@ -87,108 +155,53 @@ export default definePlugin({
             return null;
         }
     },
-    parseMath(
-        text: string
-    ): Array<{ type: "text" | "display" | "inline"; content: string }> {
-        const parts: Array<{
-            type: "text" | "display" | "inline";
-            content: string;
-        }> = [];
-        let currentText = "";
-        let i = 0;
-
-        while (i < text.length) {
-            if (text.startsWith("$$", i)) {
-                let j = i + 2;
-                let found = false;
-                while (j < text.length) {
-                    if (text.startsWith("$$", j)) {
-                        if (currentText)
-                            parts.push({ type: "text", content: currentText });
-                        currentText = "";
-                        parts.push({
-                            type: "display",
-                            content: text.slice(i + 2, j),
-                        });
-                        i = j + 2;
-                        found = true;
-                        break;
-                    }
-                    j++;
-                }
-                if (!found) {
-                    currentText += "$$";
-                    i += 2;
-                }
-            } else if (text[i] === "$") {
-                let j = i + 1;
-                let braces = 0;
-                let escaped = false;
-                let found = false;
-
-                while (j < text.length) {
-                    if (escaped) {
-                        escaped = false; // Skip the escaped character
-                    } else if (text[j] === "\\") {
-                        escaped = true;
-                    } else if (text[j] === "{") {
-                        braces++; // Increase brace depth
-                    } else if (text[j] === "}") {
-                        braces--; // Decrease brace depth
-                    } else if (text[j] === "$" && braces === 0) {
-                        // Only close the math block if we aren't inside nested braces!
-                        if (currentText)
-                            parts.push({ type: "text", content: currentText });
-                        currentText = "";
-                        parts.push({
-                            type: "inline",
-                            content: text.slice(i + 1, j),
-                        });
-                        i = j + 1;
-                        found = true;
-                        break;
-                    }
-                    j++;
-                }
-                if (!found) {
-                    currentText += "$";
-                    i++;
-                }
-            } else {
-                currentText += text[i];
-                i++;
-            }
-        }
-        if (currentText) parts.push({ type: "text", content: currentText });
-        return parts;
+    newMacros(): Record<string, string> {
+        return {
+            "\\vtonull":
+                "\\underline{\\raisebox{-0.74ex}{V}\\kern{-0.15em}31\\raisebox{-0.74ex}{\\kern{-0.08em}$n$}}",
+        };
     },
-    renderInline(text: string): HTMLSpanElement {
+
+    renderMath(content: string, isDisplay: boolean, raw: boolean, macros: Record<string, string>): Node {
+        const unpadded = content.replace(/:\u2060/g, ":");
+        const formula = raw
+            ? unpadded
+            : unpadded
+                .replace(/\\\[/g, "\\\\[")
+                .replace(/\\(?=[\s\n]|$)/g, "\\\\");
+        try {
+            const span = document.createElement("span");
+            span.innerHTML = katex.renderToString(formula, {
+                displayMode: isDisplay,
+                throwOnError: false,
+                trust: (ctx: { command: string; protocol?: string; }) =>
+                    (ctx.command === "\\href" || ctx.command === "\\url") &&
+                    /^https?$/.test(ctx.protocol ?? ""),
+                macros,
+                maxSize: 10,
+            });
+            const clamp = (el: HTMLElement, prop: "marginRight" | "bottom", min: number) => {
+                const value = parseFloat(el.style[prop]);
+                if (value < min) el.style[prop] = `${min}em`;
+            };
+            span.querySelectorAll<HTMLElement>(".mspace").forEach((el) => clamp(el, "marginRight", -2));
+            span.querySelectorAll<HTMLElement>(".rule").forEach((el) => clamp(el, "bottom", -10));
+            return span;
+        } catch (e) {
+            const delim = isDisplay ? "$$" : "$";
+            return document.createTextNode(delim + content + delim);
+        }
+    },
+
+    renderInline(text: string, raw: boolean, macros: Record<string, string>): HTMLSpanElement {
         const container = document.createElement("span");
-        const parts = this.parseMath(text);
+        const parts = parseMath(text);
 
         parts.forEach((part) => {
             if (part.type === "display" || part.type === "inline") {
-                const isDisplay = part.type === "display";
-                let formula = part.content
-                    .replace(/\\\[/g, "\\\\[")
-                    .replace(/\\(?=[\s\n]|$)/g, "\\\\");
-                try {
-                    const span = document.createElement("span");
-                    span.innerHTML = katex.renderToString(formula, {
-                        displayMode: isDisplay,
-                        throwOnError: false,
-                        macros: {
-                            "\\vtonull":
-                                "\\underline{\\raisebox{-0.74ex}{V}\\kern{-0.15em}31\\raisebox{-0.74ex}{\\kern{-0.08em}$n$}}",
-                        },
-                    });
-                    container.appendChild(span);
-                } catch (e) {
-                    const delim = isDisplay ? "$$" : "$";
-                    container.appendChild(
-                        document.createTextNode(delim + part.content + delim)
-                    );
-                }
+                container.appendChild(
+                    this.renderMath(part.content, part.type === "display", raw, macros)
+                );
             } else {
                 container.appendChild(document.createTextNode(part.content));
             }
@@ -196,7 +209,119 @@ export default definePlugin({
         return container;
     },
 
-    renderTable(lines: string[]): HTMLTableElement {
+    renderFormatted(text: string, raw: boolean, macros: Record<string, string>): HTMLSpanElement {
+        const math = new Map<
+            number,
+            { end: number; content: string; display: boolean; }
+        >();
+        let pos = 0;
+        parseMath(text).forEach((part) => {
+            const len =
+                part.content.length +
+                (part.type === "display" ? 4 : part.type === "inline" ? 2 : 0);
+            if (part.type !== "text")
+                math.set(pos, {
+                    end: pos + len,
+                    content: part.content,
+                    display: part.type === "display",
+                });
+            pos += len;
+        });
+
+        const markers = [
+            { open: "**", close: "**", tag: "strong" },
+            { open: "__", close: "__", tag: "u" },
+            { open: "~~", close: "~~", tag: "s" },
+            { open: "*", close: "*", tag: "em" },
+            { open: "_", close: "_", tag: "em" },
+            ...["b", "strong", "i", "em", "u", "s", "del", "sub", "sup"].map(
+                (t) => ({ open: `<${t}>`, close: `</${t}>`, tag: t })
+            ),
+        ];
+
+        const word = /[\p{L}\p{N}]/u;
+        const at = (i: number, s: string) =>
+            text.slice(i, i + s.length).toLowerCase() === s;
+        const canOpen = (s: string, i: number) =>
+            at(i, s) &&
+            (s.length > 1 || (!!text[i + 1] && !/\s/.test(text[i + 1]))) &&
+            (s !== "_" || !word.test(text[i - 1] ?? ""));
+        const canClose = (s: string, i: number) =>
+            at(i, s) &&
+            (s.length > 1 || (!!text[i - 1] && !/\s/.test(text[i - 1]))) &&
+            (s !== "_" || !word.test(text[i + 1] ?? ""));
+
+        const failed = new Set<string>();
+        const parse = (
+            start: number,
+            close: string | null
+        ): { nodes: Node[]; end: number; closed: boolean; } => {
+            const nodes: Node[] = [];
+            let buf = "";
+            let i = start;
+            const flush = () => {
+                if (buf) nodes.push(document.createTextNode(buf));
+                buf = "";
+            };
+
+            while (i < text.length) {
+                const m = math.get(i);
+                if (m) {
+                    flush();
+                    nodes.push(this.renderMath(m.content, m.display, raw, macros));
+                    i = m.end;
+                    continue;
+                }
+
+                const closing = close !== null && canClose(close, i);
+                const candidates = closing
+                    ? markers.filter(
+                        (k) =>
+                            k.open.length > close!.length &&
+                            k.open.startsWith(close!)
+                    )
+                    : markers;
+
+                let opened: { el: HTMLElement; end: number; } | null = null;
+                for (const k of candidates) {
+                    const key = `${i + k.open.length}|${k.close}`;
+                    if (!canOpen(k.open, i) || failed.has(key)) continue;
+                    const inner = parse(i + k.open.length, k.close);
+                    if (!inner.closed || !inner.nodes.length) {
+                        if (!inner.closed) failed.add(key);
+                        continue;
+                    }
+                    const el = document.createElement(k.tag);
+                    el.append(...inner.nodes);
+                    opened = { el, end: inner.end };
+                    break;
+                }
+                if (opened) {
+                    flush();
+                    nodes.push(opened.el);
+                    i = opened.end;
+                    continue;
+                }
+
+                if (closing) {
+                    flush();
+                    return { nodes, end: i + close!.length, closed: true };
+                }
+
+                buf += text[i];
+                i++;
+            }
+
+            flush();
+            return { nodes, end: i, closed: false };
+        };
+
+        const container = document.createElement("span");
+        container.append(...parse(0, null).nodes);
+        return container;
+    },
+
+    renderTable(lines: string[], raw: boolean, macros: Record<string, string>): HTMLTableElement {
         const table = document.createElement("table");
         table.style.cssText =
             "border-collapse:collapse;margin:8px 0;width:100%;";
@@ -220,7 +345,7 @@ export default definePlugin({
                 cell.style.cssText =
                     "border:1px solid #4e4e5a;padding:6px 12px;text-align:left;";
                 if (isHeader) cell.style.background = "#2b2d31";
-                cell.appendChild(this.renderInline(cellText));
+                cell.appendChild(this.renderFormatted(cellText, raw, macros));
                 tr.appendChild(cell);
             });
 
@@ -244,56 +369,81 @@ export default definePlugin({
         return table;
     },
 
-    tokenize(
-        text: string
-    ): Array<{ type: "table" | "katex" | "text"; content: string }> {
-        const tokens: Array<{
-            type: "table" | "katex" | "text";
-            content: string;
+    renderInPlace(msg: Element, raw: string) {
+        const found = spans(raw);
+        if (!found.length) return;
+
+        const texts: Text[] = [];
+        const walker = document.createTreeWalker(msg, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) texts.push(walker.currentNode as Text);
+
+        const positions = (ch: string) => {
+            const out: Array<[Text, number]> = [];
+            texts.forEach((t) => {
+                for (let i = 0; i < t.data.length; i++)
+                    if (t.data[i] === ch) out.push([t, i]);
+            });
+            return out;
+        };
+        const masked = raw.replace(/```[\s\S]*?```|`[^`\n]*`/g, (m) => " ".repeat(m.length));
+        const spoiler = new Set<number>();
+        for (const m of masked.matchAll(/\|\|([\s\S]+?)\|\|/g)) {
+            const end = m.index! + m[0].length;
+            [m.index!, m.index! + 1, end - 2, end - 1].forEach((n) => spoiler.add(n));
+        }
+        const indices = (ch: string) => {
+            const out: number[] = [];
+            for (let i = 0; i < raw.length; i++)
+                if (raw[i] === ch && !(ch === "|" && spoiler.has(i))) out.push(i);
+            return out;
+        };
+        const rawAt = { "$": indices("$"), "|": indices("|") };
+        const dom = { "$": positions("$"), "|": positions("|") };
+        const before = (ch: "$" | "|", pos: number) => rawAt[ch].filter((n) => n < pos).length;
+        const inCode = (n: Node) => !!n.parentElement?.closest("code, pre");
+
+        const macros = this.newMacros();
+        const jobs: Array<{
+            node: Node;
+            table: boolean;
+            start: [Text, number];
+            end: [Text, number];
+            rawEnd: number;
         }> = [];
-        const lines = text.split("\n");
-        let i = 0;
-
-        while (i < lines.length) {
-            const line = lines[i];
-
-            if (line.trim().startsWith("|")) {
-                const tableLines: string[] = [];
-                while (i < lines.length && lines[i].trim().startsWith("|")) {
-                    tableLines.push(lines[i]);
-                    i++;
-                }
-                tokens.push({ type: "table", content: tableLines.join("\n") });
-                continue;
-            }
-
-            const displayCount = (line.match(/\$\$/g) || []).length;
-            if (displayCount % 2 !== 0) {
-                const mathLines: string[] = [line];
-                i++;
-                while (i < lines.length) {
-                    mathLines.push(lines[i]);
-                    if (lines[i].includes("$$")) {
-                        i++;
-                        break;
-                    }
-                    i++;
-                }
-                tokens.push({ type: "katex", content: mathLines.join("\n") });
-                continue;
-            }
-
-            const hasMath = this.parseMath(line).some((p) => p.type !== "text");
-            if (hasMath) {
-                tokens.push({ type: "katex", content: line });
-            } else {
-                tokens.push({ type: "text", content: line });
-            }
-            i++;
+        for (const span of found) {
+            const ch = span.type === "table" ? "|" : "$";
+            if (dom[ch].length !== rawAt[ch].length) continue;
+            const start = dom[ch][before(ch, span.start)];
+            const end = dom[ch][before(ch, span.end) - 1];
+            if (!start || !end || inCode(start[0]) || inCode(end[0])) continue;
+            const node =
+                span.type === "table"
+                    ? this.renderTable(span.content.split("\n"), true, macros)
+                    : this.renderMath(span.content, span.type === "display", true, macros);
+            jobs.push({ node, table: span.type === "table", start, end, rawEnd: span.end });
         }
 
-        return tokens;
+        jobs.reverse().forEach(({ node, table, start, end, rawEnd }) => {
+            const range = document.createRange();
+            range.setStart(start[0], start[1]);
+            const after = end[1] + 1;
+            range.setEnd(
+                end[0],
+                table && end[0].data[after] === "\n" ? after + 1 : after
+            );
+            const link = end[0].parentElement?.closest("a");
+            if (link && msg.contains(link)) {
+                const rest = document.createRange();
+                rest.setStart(end[0], after);
+                rest.setEndAfter(link);
+                const leftover = rest.toString();
+                if (leftover && !raw.startsWith(leftover, rawEnd)) range.setEndAfter(link);
+            }
+            range.deleteContents();
+            range.insertNode(node);
+        });
     },
+
     processMessages() {
         const rawTargets = document.querySelectorAll(
             '[id^="message-content-"], [id^="message-username-"] > span,div[data-text-variant]'
@@ -315,16 +465,23 @@ export default definePlugin({
             const text = stored != null ? stored : this.extractRawText(msg);
             if (!text.includes("$") && !text.includes("|")) return;
 
-            const tokens = this.tokenize(text);
+            if (stored != null) {
+                this.renderInPlace(msg, stored);
+                msg.setAttribute("data-katex-processed", "true");
+                return;
+            }
+
+            const tokens = tokenize(text);
+            const macros = this.newMacros();
             msg.innerHTML = "";
 
             tokens.forEach((token, idx) => {
                 if (token.type === "table") {
                     msg.appendChild(
-                        this.renderTable(token.content.split("\n"))
+                        this.renderTable(token.content.split("\n"), false, macros)
                     );
                 } else if (token.type === "katex") {
-                    const line = this.renderInline(token.content);
+                    const line = this.renderInline(token.content, false, macros);
                     msg.appendChild(line);
                     if (idx < tokens.length - 1)
                         msg.appendChild(document.createElement("br"));

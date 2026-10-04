@@ -1,4 +1,5 @@
 import type { MessageObject } from "@api/MessageEvents";
+import { spans } from "@plugins/katex/parse";
 import definePlugin from "@utils/types";
 import { MessageActions, UserStore } from "@webpack/common";
 
@@ -12,40 +13,37 @@ function getPartLimit(text: string, limit: number) {
     return EmptyStart.test(text) ? limit - 1 : limit;
 }
 
-function cut(text: string, limit: number) {
-    let end = limit;
-    if (/^[\uDC00-\uDFFF]$/.test(text[end]) && /^[\uD800-\uDBFF]$/.test(text[end - 1])) end--;
-    return [text.slice(0, end), text.slice(end)] as const;
-}
-
 function split(text: string, limit: number) {
+    const ranges = spans(text).map(s => [s.start, s.end] as const);
+    const inside = (i: number) => ranges.find(([a, b]) => a < i && i < b);
     const chunks: string[] = [];
-    let current: string | null = null;
+    let pos = 0;
 
-    for (let line of text.split("\n")) {
-        if (line.length > getPartLimit(line, limit)) {
-            if (current) chunks.push(current);
-            current = null;
-            while (line.length > getPartLimit(line, limit)) {
-                const [part, rest] = cut(line, getPartLimit(line, limit));
-                chunks.push(part);
-                line = rest;
-            }
-            if (line) current = line;
+    while (pos < text.length) {
+        const max = getPartLimit(text.slice(pos), limit);
+        if (text.length - pos <= max) {
+            chunks.push(text.slice(pos));
+            break;
+        }
+
+        let newline = text.lastIndexOf("\n", pos + max);
+        while (newline > pos && inside(newline)) newline = text.lastIndexOf("\n", newline - 1);
+        if (newline > pos) {
+            chunks.push(text.slice(pos, newline));
+            pos = newline + 1;
             continue;
         }
 
-        const next = current === null ? line : `${current}\n${line}`;
-        if (next.length <= getPartLimit(next, limit)) {
-            current = next;
-        } else {
-            if (current) chunks.push(current);
-            current = line;
-        }
+        let end = pos + max;
+        if (/^[\uDC00-\uDFFF]$/.test(text[end]) && /^[\uD800-\uDBFF]$/.test(text[end - 1])) end--;
+        const atom = inside(end);
+        if (atom) end = atom[0];
+        if (end <= pos) return null;
+        chunks.push(text.slice(pos, end));
+        pos = end;
     }
 
-    if (current) chunks.push(current);
-    return chunks.map(chunk => EmptyStart.test(chunk) ? `\u200D${chunk}` : chunk);
+    return chunks.filter(Boolean).map(chunk => EmptyStart.test(chunk) ? `\u200D${chunk}` : chunk);
 }
 
 export default definePlugin({
@@ -55,10 +53,16 @@ export default definePlugin({
     patches: [
         {
             find: "Message Too Long Alert",
-            replacement: {
-                match: /let (\i)=\i\?\i\.\i:\i\.\i;/,
-                replace: "let $1=1e9;"
-            }
+            replacement: [
+                {
+                    match: /let (\i)=(\i\?\i\.\i:\i\.\i);if\((\i)\.length>\1\)/,
+                    replace: "let $1=$self.getMaxLength($3,$2);if($3.length>$1)"
+                },
+                {
+                    match: /if\(\i\|\|null==\i\)(?=\{var \i;\i=\i\.length)/,
+                    replace: "if(!0)"
+                }
+            ]
         },
         {
             find: "convertedStringToFile",
@@ -68,11 +72,15 @@ export default definePlugin({
             }
         }
     ],
+    getMaxLength(content: string, max: number) {
+        return content.length <= max || split(content, getLimit()) ? 1e9 : max;
+    },
     onBeforeMessageSend(channelId, message) {
         const limit = getLimit();
         if (message.content.length <= limit) return;
 
         const chunks = split(message.content, limit);
+        if (!chunks) return { cancel: true };
         message.content = chunks.shift()!;
         setTimeout(() => this.send(channelId, message, chunks));
     },
